@@ -190,7 +190,7 @@ ftpErrors executeUserCommand(char* baseCmd, char* fullCommand, int commSock, int
     }
     returnVal:
     if(err != success){
-        printErrors(err);
+        printError(err);
     }
         return err;
 }

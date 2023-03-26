@@ -52,4 +52,4 @@ void recvFileData(int sock, FILE* fileHandle, int fileSize, int chunkSize);
 void recvData(int sock, void* buff, int size);
 void sendData(int sock, void* buff, int size);
 
-void printErrors(ftpErrors err);
+void printError(ftpErrors err);

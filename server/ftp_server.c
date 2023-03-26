@@ -100,7 +100,7 @@ void* ftpServer(void* socket){
             pthread_exit(0);
         }
         if(err != success)
-            printErrors(err);
+            printError(err);
     }
 }
 

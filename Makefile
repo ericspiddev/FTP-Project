@@ -5,7 +5,7 @@ CLIENT_DIR=/client/
 DEPS=$(COMMDIR)/common.h
 OBJ= $(COMMDIR)/common.o $(CLIENT_DIR)/ftp_client.o
 
-
+all: client server
 
 common.o:
 	$(CC) -c -o $(COMMDIR)/common.o $(COMMDIR)/common.c
