@@ -27,12 +27,10 @@ void sendFileOverSocket(int sock, char* fileName, int fileHandle, int fileSize, 
     int offset = 0;
     int remainder = fileSize % chunkSize;
     if(remainder != 0){
-        printf("Sending remainder data!\n");
         sendFileData(sock, fileHandle, &offset, remainder, remainder);
         fileSize -= remainder;
     }
     if(fileSize >=  0){
-        printf("Sending the data in chunks!\n");
         sendFileData(sock, fileHandle, &offset, fileSize, chunkSize);
     }
 }
@@ -75,10 +73,8 @@ void recvFileData(int sock, FILE* fileHandle, int fileSize, int chunkSize)
         }
         else{
             fwrite(buf, sizeof(char), currBytesRecv, fileHandle);
-            printf("buf is %s\n", buf);
             bytesRecv +=  currBytesRecv;
             memset(buf, 0, currBytesRecv); // clear the buffer for the next read
-            printf("BytesRecv is %d and fileSize is %d\n", bytesRecv, fileSize);
         }
     }while(bytesRecv != fileSize);
 }
@@ -108,4 +104,37 @@ void sendData(int sock, void* buff, int size){
         }
     }while(bytesSent != size);
 
+}
+
+void printError(ftpErrors err)
+{
+    switch (err){
+        case success:
+            break;
+        case nullString:
+            printf("ERR: Null string\n");
+            break;
+        case invalidCommand:
+            printf("ERR: Invalid command\n");
+            break;
+        case noConnection:
+            printf("ERR: No Connection detected for a command that requires a connection\n");
+            break;
+        case improperCommand:
+            printf("ERR: Improperly formatted command please check HELP\n");
+            break;
+        case failedConnection:
+            printf("ERR Connection failed check the ip and port provided and ensure they are correct\n");
+            break;
+        case fileDoesNotExist:
+            printf("ERR The requested file does not exist on the file server use LIST to see what is available\n");
+            break;
+        case fileNameIsNull:
+            printf("ERR The requested file does not exist on the file server use LIST to see what is available\n");
+
+            break;
+        default:
+            printf("Unrecognized error!\n");
+            break;
+    }
 }

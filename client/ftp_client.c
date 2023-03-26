@@ -6,19 +6,22 @@
 #define DELIM   "\n"
 #define CMDDELIM " "
 
+#define MAXCLIENTS 10
+
 void userInterface();
+int randomizeDataPort();
 int dataServer();
-int initDataSocket();
+int initDataSocket(int dataPort);
 ftpErrors ftpHelp();
 ftpErrors ftpConnect(char* ip, char* port, int sock);
-ftpErrors ftpList(int welcomeSocket);
-ftpErrors ftpRetr(char* fileName, int welcomeSocket);
-ftpErrors ftpStor(char* fileName, int welcomeSocket);
+ftpErrors ftpList(int welcomeSocket, int dataPort);
+ftpErrors ftpRetr(char* fileName, int welcomeSocket, int dataPort);
+ftpErrors ftpStor(char* fileName, int welcomeSocket, int dataPort);
 ftpErrors ftpQuit(void);
 ftpErrors stringToUpper(char* string);
 ftpErrors getUserInput(char* string);
 ftpErrors validateUserCommand(char* string);
-ftpErrors executeUserCommand(char* baseCmd, char* fullCommand, int commSock, int welcomeSock, bool* isConnected);
+ftpErrors executeUserCommand(char* baseCmd, char* fullCommand, int commSock, int welcomeSock, int dataPort, bool* isConnected);
 char* commands[NUMOFCMDS] = {"CONNECT", "LIST", "RETR", "STOR", "QUIT", "HELP"};
 
 int main()
@@ -29,10 +32,18 @@ int main()
     char cpyUsrCommand[MAX_STR_SIZE];
     char firstCommand[MAX_STR_SIZE];
 
+    srand(time(NULL));
+
     userInterface();
     controlSocket = socket(AF_INET, SOCK_STREAM, 0);
-    int welcomeSocket = initDataSocket();
+    int welcomeSocket = 0;
+    int dataPort = 0;
+    do{
+        dataPort = (rand() % 65535) + 1000; // randomize port number for data connections
+        welcomeSocket = initDataSocket(dataPort);
+    }while(welcomeSocket < 0);
     while(1){
+        ftpErrors err = success;
         printf(SHELL_PROMPT);
         if(getUserInput(usrCommand) != success){
             printf("Please enter a non empty command!\n");
@@ -48,8 +59,7 @@ int main()
             printf("Please enter a valid FTP command use HELP to see valid commands\n");
             continue;
         }
-        if(executeUserCommand(firstCommand, usrCommand, controlSocket, welcomeSocket, &isConnected) != success){
-            printf("Command failed! Something went wrong.\n");
+        if(executeUserCommand(firstCommand, usrCommand, controlSocket, welcomeSocket, dataPort, &isConnected) != success){
             continue;
         }
         clearString(firstCommand);
@@ -63,6 +73,7 @@ void userInterface()
     printf("Enter a  FTP command\n");
     printf("For a list of commands type \"HELP\"\n");
 }
+
 
 ftpErrors getUserInput(char* string)
 {
@@ -98,7 +109,7 @@ ftpErrors validateUserCommand(char* string)
     return invalidCommand;
 }
 
-ftpErrors executeUserCommand(char* baseCmd, char* fullCommand, int commSock, int welcomeSock, bool* isConnected)
+ftpErrors executeUserCommand(char* baseCmd, char* fullCommand, int commSock, int welcomeSock, int dataPort, bool* isConnected)
 {
     char cpyCmd[strlen(fullCommand)];
     strcpy(cpyCmd, fullCommand);
@@ -132,21 +143,38 @@ ftpErrors executeUserCommand(char* baseCmd, char* fullCommand, int commSock, int
         goto returnVal;
     }
     else if(strcmp(baseCmd, "LIST") == 0){
-
         sendStr(commSock, baseCmd);
-        ftpList(welcomeSock);
+        sendData(commSock, &dataPort, sizeof(dataPort));
+        err = ftpList(welcomeSock, dataPort);
     }
     else if(strcmp(baseCmd, "RETR") == 0){
-
-        sendStr(commSock,baseCmd);
         char* fileName = strtok(NULL, CMDDELIM);
-        ftpRetr(fileName, welcomeSock);
+        if(fileName == NULL){
+            printf("Please provide a filename to retrieve\n");
+            err = fileNameIsNull;
+            goto returnVal;
+        }
+        sendStr(commSock,baseCmd);
+        sendData(commSock, &dataPort, sizeof(dataPort));
+
+        err = ftpRetr(fileName, welcomeSock, dataPort);
     }
     else if(strcmp(baseCmd, "STOR") == 0){
-
-        sendStr(commSock, baseCmd);
         char* fileName = strtok(NULL, CMDDELIM);
-        ftpStor(fileName, welcomeSock);
+        if(fileName == NULL){
+            printf("Please provide a filename to store\n");
+            err = fileNameIsNull;
+            goto returnVal;
+        }
+        if(open(fileName, O_RDONLY) == -1)
+        {
+            printf("Requested file to store does not exist\n");
+            return fileDoesNotExist;
+        }
+        sendStr(commSock, baseCmd);
+        sendData(commSock, &dataPort, sizeof(dataPort));
+
+       err = ftpStor(fileName, welcomeSock, dataPort);
 
     }
     else if(strcmp(baseCmd, "QUIT") == 0){
@@ -161,6 +189,9 @@ ftpErrors executeUserCommand(char* baseCmd, char* fullCommand, int commSock, int
         goto returnVal;
     }
     returnVal:
+    if(err != success){
+        printErrors(err);
+    }
         return err;
 }
 
@@ -200,10 +231,10 @@ ftpErrors ftpConnect(char* ip, char* port, int sock) // connection command
     return success;
 }
 
-ftpErrors ftpList(int welcomeSocket) // list command
+ftpErrors ftpList(int welcomeSocket, int dataPort) // list command
 {
     printf("client list\n");
-   int dataSocket= dataServer(welcomeSocket);
+    int dataSocket= dataServer(welcomeSocket, dataPort);
     if(dataSocket < 0)
     {
         printf("Data server setup failed!");
@@ -224,32 +255,40 @@ ftpErrors ftpList(int welcomeSocket) // list command
     return success;
 }
 
-ftpErrors ftpRetr(char* fileName, int welcomeSocket) // retreive command
+ftpErrors ftpRetr(char* fileName, int welcomeSocket, int dataPort) // retreive command
 {
-    int dataSocket = dataServer(welcomeSocket);  // setup connection
+    if(fileName == NULL){
+        return fileNameIsNull;
+    }
+
+    int dataSocket = dataServer(welcomeSocket, dataPort);  // setup connection
     sendStr(dataSocket, fileName); // send the filename we want to server
-
-    FILE* retrFile = fopen(fileName, "w");
-    long fileSize = 0;
-    recvData(dataSocket, &fileSize, sizeof(fileSize)); // read in size of file
-
-    recvFileOverSocket(dataSocket, retrFile, fileSize, CHUNK_SIZE); // read in file
-    fclose(retrFile);
+    char errorCheck[20] = {'\0'};
+    recvStr(dataSocket, errorCheck);
+    if(strcmp(errorCheck, "FILEFOUND") == 0){
+        FILE* retrFile = fopen(fileName, "w");
+        long fileSize = 0;
+        recvData(dataSocket, &fileSize, sizeof(fileSize)); // read in size of file
+        recvFileOverSocket(dataSocket, retrFile, fileSize, CHUNK_SIZE); // read in file
+        fclose(retrFile);
+    }
+    else{
+        printf("Filename %s not found on file server\n", fileName);
+    }
     close(dataSocket);
     return success;
 }
 
-ftpErrors ftpStor(char* fileName, int welcomeSocket) // store command
+ftpErrors ftpStor(char* fileName, int welcomeSocket, int dataPort) // store command
 {
-    int dataSocket = dataServer(welcomeSocket);
+    if(fileName == NULL){
+        return fileNameIsNull;
+    }
+    int dataSocket = dataServer(welcomeSocket, dataPort);
     int f = -1;
     struct stat fs;
 
     f = open(fileName, O_RDONLY);
-    if(f < 0 ){
-        printf("Requested file to store does not exist");
-        return fileDoesNotExist;
-    }
     if(fstat(f, &fs) < 0){
         perror("File stat failed!");
         return fileDoesNotExist;
@@ -270,13 +309,13 @@ ftpErrors ftpQuit() // quit command
     return success;
 }
 
-int initDataSocket()
+int initDataSocket(int dataPort)
 {
     int err = 0;
-    const int port = 8080;
+
     struct sockaddr_in config;
     config.sin_family = AF_INET;
-    config.sin_port = htons(DATAPORT);
+    config.sin_port = htons(dataPort);
     inet_pton(AF_INET, "127.0.0.1", &config.sin_addr);
     int welcomeSocket = socket(AF_INET, SOCK_STREAM, 0); // 1. Create socket
     if(welcomeSocket < 0){
@@ -288,34 +327,35 @@ int initDataSocket()
     if(optionStatus < 0)
     {
         printf("Socket option failed!");
-        exit(1);
+        return -1;
     }
     // 3. Convert ip string to ip address and set config struct ( also set the port and connection type)
 
     // 4. Bind to the port and ip address provided by the configuration
     err = bind(welcomeSocket,(struct sockaddr *)&config, sizeof(config));
     if(err < 0){
-        perror("Bind failed!");
-        exit(1);
+        perror("Init Data Socket Bind failed!");
+        return -1;
     }
+
+    err = listen(welcomeSocket, 10);
+    if(err < 0){
+        perror("Listen failed!");
+        return -1;
+    }
+
     return welcomeSocket;
 }
 
-int dataServer(int welcomeSocket)
+int dataServer(int welcomeSocket, int dataPort)
 {
     struct sockaddr_in config;
     config.sin_family = AF_INET;
-    config.sin_port = htons(DATAPORT);
+    config.sin_port = htons(dataPort);
     inet_pton(AF_INET, "127.0.0.1", &config.sin_addr);
-    // 5. Listen for incoming connections on the ip and port
-    int err = listen(welcomeSocket, 10);
-    if(err < 0){
-        perror("Listen failed!");
-        exit(1);
-    }
+
     // 6. Accept the incoming connection and then return the communication socket
     int length = sizeof(config);
-    printf("Entering accept call!\n");
     int dataSock = -1;
     do{
         dataSock = accept(welcomeSocket, (struct sockaddr*)&config, &length);
